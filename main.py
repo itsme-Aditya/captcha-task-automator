@@ -6,16 +6,37 @@ import pytesseract
 from ultralytics import YOLO
 import pyautogui
 import time
+import re
 import sys
+import tkinter as tk
+from threading import Thread
 from skimage.metrics import structural_similarity as ssim
-from nltk.tokenize import word_tokenize
 
-# Log directory
 # LOGS_DIR = "logs"
 # os.makedirs(LOGS_DIR, exist_ok=True)
 
-pytesseract.pytesseract.tesseract_cmd = r"assets\tesseract\tesseract.exe"
-MODEL_PATH = r"assets\final_model.pt"
+# pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# MODEL_PATH = r".\assets\final_model.pt"
+
+def get_base_path():
+    if getattr(sys, 'frozen', False):
+        return sys._MEIPASS
+    return os.path.dirname(__file__)
+
+base_path = get_base_path()
+
+try:
+    import nltk
+    nltk.data.path.append(os.path.join(base_path, "assets", "nltk_data"))
+    from nltk.tokenize import word_tokenize
+except Exception:
+    def word_tokenize(text):
+        return re.findall(r'\b\w+\b', text)
+    
+MODEL_PATH = os.path.join(base_path, "assets", "final_model.pt")
+
+tesseract_path = os.path.join(base_path, "assets", "tesseract", "tesseract.exe")
+pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
 try:
     print(f"Loading YOLO model from {MODEL_PATH}...")
@@ -33,7 +54,10 @@ VERIFY_NORMAL  = (418, 679)
 REFRESH_ERROR  = (28, 718)
 VERIFY_ERROR   = (418, 718)
 
+running = False
+# ==========================================
 # Screen Capture & Segmentation
+# ==========================================
 def find_master_box():
     """Finds captcha area: header TL for origin, header width for W,
        Verify button bottom for H. Width is always the header width."""
@@ -111,7 +135,9 @@ def get_buttons(master_h):
         return REFRESH_ERROR, VERIFY_ERROR
     return REFRESH_NORMAL, VERIFY_NORMAL
 
+# ==========================================
 # OCR
+# ==========================================
 def analyze_instruction(header_crop):
     scaled = cv2.resize(header_crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
     gray = cv2.cvtColor(scaled, cv2.COLOR_BGR2GRAY)
@@ -159,7 +185,9 @@ def read_error_message(full_img):
         return "TRY_AGAIN"
     return None
 
+# ==========================================
 # Helpers
+# ==========================================
 def mask_checkmark(img):
     """
     Masks top-left region where the select-checkmark appears.
@@ -196,6 +224,7 @@ def arrays_match(cells_old, cells_new):
     # for idx, (old_img, new_img) in enumerate(zip(cells_old, cells_new), start=1):
     #     cv2.imwrite(os.path.join(debug_dir, f"cell{idx}_old.png"), old_img)
     #     cv2.imwrite(os.path.join(debug_dir, f"cell{idx}_new.png"), new_img)
+
     if ssim is None:
         print("Warning: scikit-image not found. Falling back to exact comparison.")
         return all(np.array_equal(o, n) for o, n in zip(cells_old, cells_new))
@@ -281,7 +310,9 @@ def get_positive_cells(grid, target):
 
     return cells, positive_cells, cell_centers
 
+# ==========================================
 # Main Loop
+# ==========================================
 def observe_loop():
     print("Starting Observation Loop...")
     previous_cells = []
@@ -289,11 +320,11 @@ def observe_loop():
     master_x, master_y, master_w, master_h = find_master_box()
     if master_x is None:
         print("Could not find captcha. Aborting.")
-        sys.exit(1)
+        return
 
     iteration = 0
 
-    while iteration < MAX_ITERATIONS:
+    while iteration < MAX_ITERATIONS and running:
         iteration += 1
         print(f"\n--- Iteration {iteration}/{MAX_ITERATIONS} ---")
 
@@ -329,7 +360,7 @@ def observe_loop():
 
         if previous_cells and arrays_match(current_cells, previous_cells):
             print("Cells unchanged. Aborting.")
-            sys.exit(0)
+            return
         previous_cells = current_cells
 
         # --- CLICK POSITIVE CELLS (dynamic centers) ---
@@ -353,7 +384,7 @@ def observe_loop():
         master_x2, master_y2, master_w2, master_h2 = find_master_box()
         if master_x2 is None:
             print("Captcha disappeared — assuming solved. Aborting.")
-            sys.exit(0)
+            return
         master_x, master_y, master_w, master_h = master_x2, master_y2, master_w2, master_h2
 
         # --- READ ERROR MESSAGE ---
@@ -402,11 +433,49 @@ def observe_loop():
             continue
         else:
             print("No error detected — assuming solved. Aborting.")
-            sys.exit(0)
+            return
 
     print(f"Reached max iterations ({MAX_ITERATIONS}). Aborting.")
-    sys.exit(0)
+    return
 
+def on_bot_finished():
+    global running
+    running = False
+    solve_btn.config(text="Solve")
+    status_label.config(text="Idle")
 
-if __name__ == "__main__":
-    observe_loop()
+def toggle_bot():
+    global running
+
+    if not running:
+        running = True
+        solve_btn.config(text="Stop")
+        status_label.config(text="Running...")
+
+        def run_bot():
+            try:
+                observe_loop()
+            finally:
+                root.after(0, on_bot_finished)
+
+        Thread(target=run_bot, daemon=True).start()
+
+    else:
+        running = False
+        solve_btn.config(text="Solve")
+        status_label.config(text="Stopped")
+
+# --- UI ---
+root = tk.Tk()
+root.resizable(False, False)
+root.title("Captcha Solver")
+
+root.geometry("400x150")
+
+solve_btn = tk.Button(root, text="Solve", command=toggle_bot, width=12, height=2)
+solve_btn.pack(pady=20)
+
+status_label = tk.Label(root, text="Idle")
+status_label.pack(pady=10)
+
+root.mainloop()
