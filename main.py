@@ -1,22 +1,14 @@
 import os
-import mss
-import cv2
-import numpy as np
-import pytesseract
-from ultralytics import YOLO
 import pyautogui
 import time
 import re
 import sys
 import tkinter as tk
+import customtkinter as ctk
 from threading import Thread
-from skimage.metrics import structural_similarity as ssim
 
 # LOGS_DIR = "logs"
 # os.makedirs(LOGS_DIR, exist_ok=True)
-
-# pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-# MODEL_PATH = r".\assets\final_model.pt"
 
 def get_base_path():
     if getattr(sys, 'frozen', False):
@@ -35,16 +27,6 @@ except Exception:
     
 MODEL_PATH = os.path.join(base_path, "assets", "final_model.pt")
 
-tesseract_path = os.path.join(base_path, "assets", "tesseract", "tesseract.exe")
-pytesseract.pytesseract.tesseract_cmd = tesseract_path
-
-try:
-    print(f"Loading YOLO model from {MODEL_PATH}...")
-    model = YOLO(MODEL_PATH)
-except Exception as e:
-    print(f"Warning: Failed to load YOLO model: {e}")
-    model = None
-
 MAX_ITERATIONS = 5
 CONF_THRESHOLD = 0.30
 
@@ -54,73 +36,126 @@ VERIFY_NORMAL  = (418, 679)
 REFRESH_ERROR  = (28, 718)
 VERIFY_ERROR   = (418, 718)
 
+LOG_LEVEL = "USER"  # USER or DEBUG
+
 running = False
+sct = None
+model = None
+cv2 = None
+np = None
+mss = None
+pytesseract = None
+ssim = None
+
+def log_user(msg):
+    print(msg)
+
+def log_debug(msg):
+    if LOG_LEVEL == "DEBUG":
+        print(msg)
+
+def load_resources():
+    global model, cv2, np, mss, pytesseract, ssim
+
+    if model is not None:
+        return  # already loaded
+
+    log_user("Initializing model...")
+
+    import cv2 as _cv2
+    import numpy as _np
+    import mss as _mss
+    import pytesseract as _pytesseract
+    from ultralytics import YOLO as _YOLO
+    from skimage.metrics import structural_similarity as _ssim
+
+    cv2 = _cv2
+    np = _np
+    mss = _mss
+    pytesseract = _pytesseract
+    ssim = _ssim
+
+    # setup tesseract again AFTER import
+    tesseract_path = os.path.join(base_path, "assets", "tesseract", "tesseract.exe")
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+
+    # load model
+    try:
+        print(f"Loading YOLO model from {MODEL_PATH}...")
+        model = _YOLO(MODEL_PATH)
+        log_user("Model ready ✅")
+    except Exception as e:
+        print(f"Failed to load model: {e}")
+        model = None
+
 # ==========================================
 # Screen Capture & Segmentation
 # ==========================================
 def find_master_box():
     """Finds captcha area: header TL for origin, header width for W,
        Verify button bottom for H. Width is always the header width."""
-    with mss.mss() as sct:
-        monitor = sct.monitors[1]
-        scan_region = {
-            "left": monitor["left"],
-            "top": monitor["top"],
-            "width": monitor["width"] // 2,
-            "height": monitor["height"] - 80
-        }
-        raw_img = sct.grab(scan_region)
-        bgr_img = cv2.cvtColor(np.array(raw_img), cv2.COLOR_BGRA2BGR)
+    global sct, mss
+    
+    monitor = sct.monitors[1]
+    scan_region = {
+        "left": monitor["left"],
+        "top": monitor["top"],
+        "width": monitor["width"] // 2,
+        "height": monitor["height"] - 80
+    }
+    raw_img = sct.grab(scan_region)
+    bgr_img = cv2.cvtColor(np.array(raw_img), cv2.COLOR_BGRA2BGR)
 
-        hsv = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, np.array([95, 100, 100]), np.array([125, 255, 255]))
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    hsv = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array([95, 100, 100]), np.array([125, 255, 255]))
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        header_contours = [c for c in contours if cv2.contourArea(c) > 15000]
-        button_contours = [c for c in contours if 200 < cv2.contourArea(c) < 5000]
+    header_contours = [c for c in contours if cv2.contourArea(c) > 15000]
+    button_contours = [c for c in contours if 200 < cv2.contourArea(c) < 5000]
 
-        if not header_contours:
-            return None, None, None, None
+    if not header_contours:
+        return None, None, None, None
 
-        # Header = largest blue contour → gives us TL and authoritative W
-        header = max(header_contours, key=cv2.contourArea)
-        hx, hy, hw, hh = cv2.boundingRect(header)
-        tl_x = hx
-        tl_y = hy
-        calc_w = hw  # header width IS the captcha width (always 482)
+    # Header = largest blue contour → gives us TL and authoritative W
+    header = max(header_contours, key=cv2.contourArea)
+    hx, hy, hw, hh = cv2.boundingRect(header)
+    tl_x = hx
+    tl_y = hy
+    calc_w = hw  # header width IS the captcha width (always 482)
 
-        # Find Verify button: right-aligned below header
-        header_right = hx + hw
-        valid_buttons = []
-        for c in button_contours:
-            bx, by, bw, bh = cv2.boundingRect(c)
-            br_x = bx + bw
-            if (header_right - 40) < br_x < (header_right + 10):
-                if by > (hy + hh):
-                    valid_buttons.append(c)
+    # Find Verify button: right-aligned below header
+    header_right = hx + hw
+    valid_buttons = []
+    for c in button_contours:
+        bx, by, bw, bh = cv2.boundingRect(c)
+        br_x = bx + bw
+        if (header_right - 40) < br_x < (header_right + 10):
+            if by > (hy + hh):
+                valid_buttons.append(c)
 
-        if valid_buttons:
-            verify = max(valid_buttons, key=lambda c: cv2.boundingRect(c)[1] + cv2.boundingRect(c)[3])
-            vx, vy, vw, vh = cv2.boundingRect(verify)
-            calc_h = (vy + vh) - tl_y
-        else:
-            calc_h = 706
+    if valid_buttons:
+        verify = max(valid_buttons, key=lambda c: cv2.boundingRect(c)[1] + cv2.boundingRect(c)[3])
+        vx, vy, vw, vh = cv2.boundingRect(verify)
+        calc_h = (vy + vh) - tl_y
+    else:
+        calc_h = 706
 
-        # Captcha is always at least 706px tall (744 with error). If we got less,
-        # a spurious blue element inside the grid was misdetected as the button.
-        if calc_h < 706:
-            calc_h = 706
+    # Captcha is always at least 706px tall (744 with error). If we got less,
+    # a spurious blue element inside the grid was misdetected as the button.
+    if calc_h < 706:
+        calc_h = 706
 
-        global_x = scan_region["left"] + tl_x
-        global_y = scan_region["top"] + tl_y
-        print(f"  [find_master_box] TL=({global_x},{global_y}) W={calc_w} H={calc_h}")
-        return global_x, global_y, calc_w, calc_h
+    global_x = scan_region["left"] + tl_x
+    global_y = scan_region["top"] + tl_y
+    log_debug(f"  [find_master_box] TL=({global_x},{global_y}) W={calc_w} H={calc_h}")
+    return global_x, global_y, calc_w, calc_h
 
 def capture_master_region(master_x, master_y, master_w, master_h):
+    global sct, mss
+    
     region = {"left": master_x, "top": master_y, "width": master_w, "height": master_h}
-    with mss.mss() as sct:
-        raw_img = sct.grab(region)
-        return cv2.cvtColor(np.array(raw_img), cv2.COLOR_BGRA2BGR)
+    raw_img = sct.grab(region)
+    return cv2.cvtColor(np.array(raw_img), cv2.COLOR_BGRA2BGR)
 
 def extract_captcha_elements(full_img, master_w, master_h):
     header_crop = full_img[0:142, 0:master_w]
@@ -178,7 +213,7 @@ def read_error_message(full_img):
     gray = cv2.cvtColor(scaled, cv2.COLOR_BGR2GRAY)
     text = pytesseract.image_to_string(gray, config='--psm 7').lower()
     tokens = word_tokenize(text)
-    print(f"  [Error OCR] text='{text.strip()}' tokens={tokens}")
+    log_debug(f"  [Error OCR] text='{text.strip()}' tokens={tokens}")
     if "select" in tokens or "matching" in tokens or "new" in tokens:
         return "NEW_IMAGES"
     if "try" in tokens or "again" in tokens:
@@ -217,7 +252,7 @@ def arrays_match(cells_old, cells_new):
     if len(cells_old) != len(cells_new):
         return False
     time.sleep(2)
-    print("\n\n\n\narrays_match called") 
+    log_debug("\n\n\n\narrays_match called") 
     # Save all cells for debugging
     # debug_dir = "debug_cells"
     # os.makedirs(debug_dir, exist_ok=True)
@@ -242,7 +277,7 @@ def arrays_match(cells_old, cells_new):
         old_gray = cv2.cvtColor(old_p, cv2.COLOR_BGR2GRAY)
         new_gray = cv2.cvtColor(new_p, cv2.COLOR_BGR2GRAY)
         score, _ = ssim(old_gray, new_gray, full=True)
-        print(f"  Cell {i} SSIM: {score:.3f}")
+        log_debug(f"  Cell {i} SSIM: {score:.3f}")
         if score < 0.5:
             old_m2 = mask_checkmark(normalize_cell(old_img))
             old_p2 = preprocess_for_match(old_m2)
@@ -260,7 +295,7 @@ def arrays_match(cells_old, cells_new):
     return True
 
 def slow_click(gx, gy):
-    pyautogui.moveTo(gx, gy + 15, duration=0.8)
+    pyautogui.moveTo(gx, gy + 15, duration=1.0) # 0.8
     time.sleep(0.1)
     pyautogui.click()
 
@@ -302,7 +337,7 @@ def get_positive_cells(grid, target):
                     for rank, (idx, conf) in enumerate(zip(top5[:2], top5_conf[:2])):
                         class_name = model.names[int(idx)].lower()
                         conf_val = float(conf)
-                        print(f"  {cell_id} rank{rank+1}: {class_name} {conf_val:.2f}")
+                        log_debug(f"  {cell_id} rank{rank+1}: {class_name} {conf_val:.2f}")
                         if (target_lower in class_name or class_name in target_lower) and conf_val >= CONF_THRESHOLD:
                             is_positive = True
                     if is_positive:
@@ -326,7 +361,7 @@ def observe_loop():
 
     while iteration < MAX_ITERATIONS and running:
         iteration += 1
-        print(f"\n--- Iteration {iteration}/{MAX_ITERATIONS} ---")
+        log_user(f"Step {iteration}/{MAX_ITERATIONS}")
 
         full_img = capture_master_region(master_x, master_y, master_w, master_h)
         # cv2.imwrite(os.path.join(LOGS_DIR, "captcha_area.png"), full_img)
@@ -338,7 +373,7 @@ def observe_loop():
 
         if action == "REFRESH":
             refresh_btn, _ = get_buttons(master_h)
-            print("Target: segmentation (squares) — clicking Refresh")
+            log_user("Refreshing captcha...")
             slow_click(master_x + refresh_btn[0], master_y + refresh_btn[1])
             time.sleep(1)
             previous_cells = []
@@ -353,10 +388,13 @@ def observe_loop():
             time.sleep(3)
             continue
 
-        print(f"Target: {target}")
+        log_user(f"Detected task: Select {target}")
 
         current_cells, positive_cells, cell_centers = get_positive_cells(grid, target)
-        print(f"Positive cells: {positive_cells}")
+        if positive_cells:
+            log_user(f"Found {len(positive_cells)} matching tiles")
+        else:
+            log_user("No matching tiles found")
 
         if previous_cells and arrays_match(current_cells, previous_cells):
             print("Cells unchanged. Aborting.")
@@ -365,7 +403,7 @@ def observe_loop():
 
         # --- CLICK POSITIVE CELLS (dynamic centers) ---
         if positive_cells:
-            print("Clicking positive cells...")
+            log_user("Selecting matching tiles...")
             for cell_id in positive_cells:
                 lx, ly = cell_centers[cell_id]
                 global_cx = master_x + lx
@@ -376,14 +414,14 @@ def observe_loop():
 
         # --- CLICK VERIFY (fixed from map files) ---
         refresh_btn, verify_btn = get_buttons(master_h)
-        print(f"Clicking Verify at local {verify_btn}...")
+        log_user("Submitting selection...")
         slow_click(master_x + verify_btn[0], master_y + verify_btn[1])
         time.sleep(2)
 
         # --- RE-LOCATE after verify ---
         master_x2, master_y2, master_w2, master_h2 = find_master_box()
         if master_x2 is None:
-            print("Captcha disappeared — assuming solved. Aborting.")
+            log_user("Captcha solved successfully ✅")
             return
         master_x, master_y, master_w, master_h = master_x2, master_y2, master_w2, master_h2
 
@@ -393,7 +431,7 @@ def observe_loop():
 
         if error_type == "NEW_IMAGES":
             time.sleep(2)
-            print("'Please select all matching images' — checking for new cells...")
+            log_user("Please select all matching images — Checking for new cells...")
             # Extract fresh cells from the current grid after the click
             _, grid_after = extract_captcha_elements(full_img_after, master_w, master_h)
             h, w = grid_after.shape[:2]
@@ -421,7 +459,7 @@ def observe_loop():
             previous_cells = []
             continue
         elif error_type == "TRY_AGAIN":
-            print("'Please try again' — re-locating and clicking Refresh.")
+            log_user("Retry required, refreshing captcha...")
             time.sleep(1)  # wait for UI expansion to settle
             m_x, m_y, m_w, m_h = find_master_box()
             if m_x is not None:
@@ -438,23 +476,52 @@ def observe_loop():
     print(f"Reached max iterations ({MAX_ITERATIONS}). Aborting.")
     return
 
+# ----------------------------------------------------
+# Functions for Tkinter Graphical User Interface
+# ----------------------------------------------------
 def on_bot_finished():
     global running
     running = False
-    solve_btn.config(text="Solve")
-    status_label.config(text="Idle")
+    spinner.stop()
+    spinner.set(0)
+    spinner.pack_forget()
+    solve_btn.configure(text="Solve")
+    status_label.configure(text="Idle")
 
 def toggle_bot():
     global running
 
     if not running:
         running = True
-        solve_btn.config(text="Stop")
-        status_label.config(text="Running...")
+        solve_btn.configure(text="Stop")
+        status_label.configure(text="Running...")
 
         def run_bot():
+            global sct
             try:
+                # START SPINNER
+                def start_loading():
+                    spinner.pack(after=solve_btn, pady=5)
+                    spinner.start()
+                    status_label.configure(text="Loading...")
+
+                root.after(0, start_loading)
+
+                load_resources()
+                import mss as _mss
+                sct = _mss.mss()
+
+                # STOP SPINNER
+                def stop_loading():
+                    spinner.stop()
+                    spinner.set(0)
+                    spinner.pack_forget()
+                    status_label.configure(text="Running...")
+
+                root.after(0, stop_loading)
+
                 observe_loop()
+
             finally:
                 root.after(0, on_bot_finished)
 
@@ -462,20 +529,106 @@ def toggle_bot():
 
     else:
         running = False
-        solve_btn.config(text="Solve")
-        status_label.config(text="Stopped")
+        solve_btn.configure(text="Solve")
+        status_label.configure(text="Stopped")
+        spinner.stop()
+        spinner.pack_forget()
 
-# --- UI ---
-root = tk.Tk()
-root.resizable(False, False)
-root.title("Captcha Solver")
+def log(message):
+    def append():
+        log_box.configure(state="normal")
+        log_box.insert("end", message + "\n")
 
-root.geometry("400x150")
+        # limit log size
+        if int(log_box.index("end-1c").split(".")[0]) > 200:
+            log_box.delete("1.0", "2.0")
 
-solve_btn = tk.Button(root, text="Solve", command=toggle_bot, width=12, height=2)
-solve_btn.pack(pady=20)
+        log_box.configure(state="disabled")
+        log_box.see("end")
 
-status_label = tk.Label(root, text="Idle")
-status_label.pack(pady=10)
+    root.after(0, append)
+
+class PrintRedirector:
+    def write(self, message):
+        if message.strip():
+            log(message.strip())
+
+    def flush(self):
+        pass
+
+sys.stdout = PrintRedirector()
+sys.stderr = PrintRedirector()
+
+
+def clear_logs():
+    log_box.configure(state='normal')
+    log_box.delete(1.0, tk.END)
+    log_box.configure(state='disabled')
+
+
+# ------------------- UI -------------------
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+root = ctk.CTk()
+root.title("Captcha Task Automator")
+
+window_width = 500
+window_height = 380
+
+root.update_idletasks()
+
+screen_width = root.winfo_screenwidth()
+
+x = screen_width - window_width - 300
+y = 200
+
+root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+root.attributes("-topmost", True)
+
+# ------------------- Solve Button -------------------
+solve_btn = ctk.CTkButton(
+    root,
+    text="Solve",
+    command=toggle_bot,
+    width=120,
+    height=40
+)
+solve_btn.pack(pady=15)
+
+# ------------------- Spinner (Progress Bar) -------------------
+spinner = ctk.CTkProgressBar(root, width=200)
+spinner.pack(pady=5)
+spinner.set(0)  # idle state
+spinner.pack_forget()
+
+# ------------------- Status Label -------------------
+status_label = ctk.CTkLabel(root, text="Idle")
+status_label.pack(pady=5)
+
+# ------------------- Preview -------------------
+preview_label = ctk.CTkLabel(root, text="")
+preview_label.pack(pady=5)
+
+# ------------------- Log Box -------------------
+log_box = ctk.CTkTextbox(
+    root,
+    width=475,
+    height=150,
+    font=("Cascadia Code", 11)
+)
+log_box.pack(pady=10)
+
+log_box.configure(state="disabled")
+
+# ------------------- Clear Button -------------------
+clear_btn = ctk.CTkButton(
+    root,
+    text="Clear Logs",
+    command=clear_logs,
+    width=120
+)
+clear_btn.pack(pady=5)
 
 root.mainloop()
