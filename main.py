@@ -5,7 +5,7 @@ import re
 import sys
 import tkinter as tk
 import customtkinter as ctk
-from threading import Thread
+from threading import Thread, Lock
 
 # LOGS_DIR = "logs"
 # os.makedirs(LOGS_DIR, exist_ok=True)
@@ -38,6 +38,8 @@ VERIFY_ERROR   = (418, 718)
 
 LOG_LEVEL = "USER"  # USER or DEBUG
 
+pyautogui.FAILSAFE = True
+
 running = False
 sct = None
 model = None
@@ -54,39 +56,43 @@ def log_debug(msg):
     if LOG_LEVEL == "DEBUG":
         print(msg)
 
+model_lock = Lock()
 def load_resources():
     global model, cv2, np, mss, pytesseract, ssim
 
     if model is not None:
-        return  # already loaded
+        return
+    
+    with model_lock:
+        if model is not None:
+            return  # already loaded
 
-    log_user("Initializing model...")
+        log_user("Initializing model...")
 
-    import cv2 as _cv2
-    import numpy as _np
-    import mss as _mss
-    import pytesseract as _pytesseract
-    from ultralytics import YOLO as _YOLO
-    from skimage.metrics import structural_similarity as _ssim
+        import cv2 as _cv2
+        import numpy as _np
+        import mss as _mss
+        import pytesseract as _pytesseract
+        from ultralytics import YOLO as _YOLO
+        from skimage.metrics import structural_similarity as _ssim
 
-    cv2 = _cv2
-    np = _np
-    mss = _mss
-    pytesseract = _pytesseract
-    ssim = _ssim
+        cv2 = _cv2
+        np = _np
+        mss = _mss
+        pytesseract = _pytesseract
+        ssim = _ssim
 
-    # setup tesseract again AFTER import
-    tesseract_path = os.path.join(base_path, "assets", "tesseract", "tesseract.exe")
-    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+        # setup tesseract again AFTER import
+        tesseract_path = os.path.join(base_path, "assets", "tesseract", "tesseract.exe")
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
-    # load model
-    try:
-        print(f"Loading YOLO model from {MODEL_PATH}...")
-        model = _YOLO(MODEL_PATH)
-        log_user("Model ready ✅")
-    except Exception as e:
-        print(f"Failed to load model: {e}")
-        model = None
+        # load model
+        try:
+            model = _YOLO(MODEL_PATH)
+            log_user("Model ready")
+        except Exception as e:
+            print(f"Failed to load model: {e}")
+            model = None
 
 # ==========================================
 # Screen Capture & Segmentation
@@ -116,7 +122,7 @@ def find_master_box():
     if not header_contours:
         return None, None, None, None
 
-    # Header = largest blue contour → gives us TL and authoritative W
+    # Header = largest blue contour ΓåÆ gives us TL and authoritative W
     header = max(header_contours, key=cv2.contourArea)
     hx, hy, hw, hh = cv2.boundingRect(header)
     tl_x = hx
@@ -259,7 +265,6 @@ def arrays_match(cells_old, cells_new):
     # for idx, (old_img, new_img) in enumerate(zip(cells_old, cells_new), start=1):
     #     cv2.imwrite(os.path.join(debug_dir, f"cell{idx}_old.png"), old_img)
     #     cv2.imwrite(os.path.join(debug_dir, f"cell{idx}_new.png"), new_img)
-
     if ssim is None:
         print("Warning: scikit-image not found. Falling back to exact comparison.")
         return all(np.array_equal(o, n) for o, n in zip(cells_old, cells_new))
@@ -421,7 +426,7 @@ def observe_loop():
         # --- RE-LOCATE after verify ---
         master_x2, master_y2, master_w2, master_h2 = find_master_box()
         if master_x2 is None:
-            log_user("Captcha solved successfully ✅")
+            log_user("Captcha solved successfully ")
             return
         master_x, master_y, master_w, master_h = master_x2, master_y2, master_w2, master_h2
 
@@ -431,7 +436,7 @@ def observe_loop():
 
         if error_type == "NEW_IMAGES":
             time.sleep(2)
-            log_user("Please select all matching images — Checking for new cells...")
+            log_user("Please select all matching images ΓÇö Checking for new cells...")
             # Extract fresh cells from the current grid after the click
             _, grid_after = extract_captcha_elements(full_img_after, master_w, master_h)
             h, w = grid_after.shape[:2]
@@ -470,7 +475,7 @@ def observe_loop():
             previous_cells = []
             continue
         else:
-            print("No error detected — assuming solved. Aborting.")
+            print("No error detected ΓÇö assuming solved. Aborting.")
             return
 
     print(f"Reached max iterations ({MAX_ITERATIONS}). Aborting.")
@@ -494,32 +499,20 @@ def toggle_bot():
     if not running:
         running = True
         solve_btn.configure(text="Stop")
-        status_label.configure(text="Running...")
 
         def run_bot():
             global sct
             try:
-                # START SPINNER
-                def start_loading():
+                # Start spinner (for solving)
+                def start_running():
                     spinner.pack(after=solve_btn, pady=5)
                     spinner.start()
-                    status_label.configure(text="Loading...")
+                    status_label.configure(text="Running...")
 
-                root.after(0, start_loading)
-
+                root.after(0, start_running)
                 load_resources()
                 import mss as _mss
                 sct = _mss.mss()
-
-                # STOP SPINNER
-                def stop_loading():
-                    spinner.stop()
-                    spinner.set(0)
-                    spinner.pack_forget()
-                    status_label.configure(text="Running...")
-
-                root.after(0, stop_loading)
-
                 observe_loop()
 
             finally:
@@ -532,6 +525,7 @@ def toggle_bot():
         solve_btn.configure(text="Solve")
         status_label.configure(text="Stopped")
         spinner.stop()
+        spinner.set(0)
         spinner.pack_forget()
 
 def log(message):
@@ -565,6 +559,15 @@ def clear_logs():
     log_box.delete(1.0, tk.END)
     log_box.configure(state='disabled')
 
+def preload_model():
+    try:
+        root.after(0, lambda: status_label.configure(text="Preloading model..."))
+        load_resources()
+        root.after(0, lambda: solve_btn.configure(state="normal"))
+        root.after(0, lambda: status_label.configure(text="Idle"))
+    except Exception as e:
+        log(f"Preload failed: {e}")
+
 
 # ------------------- UI -------------------
 ctk.set_appearance_mode("dark")
@@ -596,6 +599,7 @@ solve_btn = ctk.CTkButton(
     height=40
 )
 solve_btn.pack(pady=15)
+solve_btn.configure(state="disabled")
 
 # ------------------- Spinner (Progress Bar) -------------------
 spinner = ctk.CTkProgressBar(root, width=200)
@@ -631,4 +635,5 @@ clear_btn = ctk.CTkButton(
 )
 clear_btn.pack(pady=5)
 
+Thread(target=preload_model, daemon=True).start()
 root.mainloop()
