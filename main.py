@@ -6,6 +6,7 @@ import sys
 import tkinter as tk
 import customtkinter as ctk
 from threading import Thread, Lock
+from PIL import Image, ImageTk
 
 # LOGS_DIR = "logs"
 # os.makedirs(LOGS_DIR, exist_ok=True)
@@ -39,6 +40,8 @@ VERIFY_ERROR   = (418, 718)
 LOG_LEVEL = "USER"  # USER or DEBUG
 
 pyautogui.FAILSAFE = True
+
+gif_completed_once = False
 
 running = False
 sct = None
@@ -122,7 +125,7 @@ def find_master_box():
     if not header_contours:
         return None, None, None, None
 
-    # Header = largest blue contour ΓåÆ gives us TL and authoritative W
+    # Header = largest blue contour → gives us TL and authoritative W
     header = max(header_contours, key=cv2.contourArea)
     hx, hy, hw, hh = cv2.boundingRect(header)
     tl_x = hx
@@ -436,7 +439,7 @@ def observe_loop():
 
         if error_type == "NEW_IMAGES":
             time.sleep(2)
-            log_user("Please select all matching images ΓÇö Checking for new cells...")
+            log_user("Please select all matching images — Checking for new cells...")
             # Extract fresh cells from the current grid after the click
             _, grid_after = extract_captcha_elements(full_img_after, master_w, master_h)
             h, w = grid_after.shape[:2]
@@ -475,7 +478,7 @@ def observe_loop():
             previous_cells = []
             continue
         else:
-            print("No error detected ΓÇö assuming solved. Aborting.")
+            print("No error detected — assuming solved. Aborting.")
             return
 
     print(f"Reached max iterations ({MAX_ITERATIONS}). Aborting.")
@@ -559,15 +562,73 @@ def clear_logs():
     log_box.delete(1.0, tk.END)
     log_box.configure(state='disabled')
 
+def animate_gif():
+    global gif_index, gif_running, gif_completed_once
+
+    if not gif_running or not gif_frames:
+        return
+
+    frame = gif_frames[gif_index]
+    gif_label.configure(image=frame)
+    gif_label.lift()
+
+    gif_index += 1
+
+    if gif_index >= len(gif_frames):
+        gif_completed_once = True
+        gif_index = 0  # loop if still running
+
+    root.after(100, animate_gif)
+
 def preload_model():
+    global gif_running
+
     try:
         root.after(0, lambda: status_label.configure(text="Preloading model..."))
+
+        # START GIF
+        gif_running = True
+        root.after(0, animate_gif)
+
+        # LOAD MODEL (blocking)
         load_resources()
-        root.after(0, lambda: solve_btn.configure(state="normal"))
-        root.after(0, lambda: status_label.configure(text="Idle"))
+
+        # AFTER LOADING → wait for GIF to finish current loop
+        def stop_when_ready():
+            if not gif_completed_once:
+                root.after(100, stop_when_ready)
+                return
+
+            # NOW stop
+            global gif_running
+            gif_running = False
+            gif_label.place_forget()
+
+            solve_btn.configure(state="normal")
+            status_label.configure(text="Idle")
+
+        root.after(0, stop_when_ready)
+
     except Exception as e:
         log(f"Preload failed: {e}")
 
+gif_frames = []
+gif_index = 0
+gif_label = None
+gif_running = False
+
+def load_gif(path):
+    global gif_frames
+    gif = Image.open(path)
+
+    gif_frames = []
+    try:
+        while True:
+            frame = gif.copy().resize((window_width, window_height))
+            gif_frames.append(ImageTk.PhotoImage(frame))
+            gif.seek(len(gif_frames))  # next frame
+    except EOFError:
+        pass
 
 # ------------------- UI -------------------
 ctk.set_appearance_mode("dark")
@@ -589,6 +650,16 @@ y = 200
 root.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
 root.attributes("-topmost", True)
+
+gif_label = tk.Label(root, bd=0)
+gif_label.place(x=0, y=0, relwidth=1, relheight=1)
+gif_label.lift()
+
+gif_path = os.path.join(base_path, "assets", "intro1.gif")
+load_gif(gif_path)
+
+gif_running = True
+animate_gif()
 
 # ------------------- Solve Button -------------------
 solve_btn = ctk.CTkButton(
