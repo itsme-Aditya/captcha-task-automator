@@ -1,3 +1,6 @@
 .venv/
 .vscode/
 assets/
+.env
+__pycache__/
+logs/
