@@ -87,7 +87,6 @@ def draw_positive_cells(grid, positive_cells):
 # ==========================================
 def observe_loop(model, on_update=None):
     print("Starting Observation Loop...")
-    print("Main model ID:", id(model)) # <--------------------------------delete
     previous_cells = []
 
     master_x, master_y, master_w, master_h = find_master_box()

@@ -20,6 +20,12 @@ mss = None
 pytesseract = None
 ssim = None
 
+BG = "#121212"
+PANEL = "#1E1E1E"
+ACCENT = "#00FF9C"
+ACCENT_HOVER = "#00cc7a"
+TEXT = "#E5E5E5"
+
 if not API_KEY:
     print("SAM3 not detected. Segmentations will be skipped.")
 
@@ -77,9 +83,10 @@ def on_bot_finished():
     running = False
     spinner.stop()
     spinner.set(0)
-    spinner.pack_forget()
     solve_btn.configure(text="Solve")
     status_label.configure(text="Idle")
+    preview_label.configure(image=None, text="Preview")
+    preview_label.image = None
 
 def toggle_bot():
     global running
@@ -93,15 +100,14 @@ def toggle_bot():
             try:
                 # Start spinner (for solving)
                 def start_running():
-                    spinner.pack(after=solve_btn, pady=5)
                     spinner.start()
-                    status_label.configure(text="Running...")
+                    # status_label.configure(text="Running...", text_color="#00FF9C")
+                    status_label.configure(text="Running...", text_color= ACCENT)
 
                 root.after(0, start_running)
                 load_resources()
                 import mss as _mss
                 sct = _mss.mss()
-                print("Main model ID:", id(model)) # <---------------------delete
                 observe_loop(model, on_update=update_preview)
 
             finally:
@@ -112,10 +118,9 @@ def toggle_bot():
     else:
         running = False
         solve_btn.configure(text="Solve")
-        status_label.configure(text="Stopped")
+        status_label.configure(text="Stopped", text_color="#FF4C4C")
         spinner.stop()
         spinner.set(0)
-        spinner.pack_forget()
 
 def log(message):
     def append():
@@ -191,7 +196,7 @@ def preload_model():
             gif_label.place_forget()
 
             solve_btn.configure(state="normal")
-            status_label.configure(text="Idle")
+            status_label.configure(text="Idle", text_color="#888888")
 
         root.after(0, stop_when_ready)
 
@@ -221,7 +226,7 @@ def update_preview(img):
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(img_rgb)
 
-        pil_img = pil_img.resize((220, 220))
+        pil_img = pil_img.resize((220, 220), Image.LANCZOS)
 
         tk_img = ImageTk.PhotoImage(pil_img)
 
@@ -235,7 +240,13 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 root = ctk.CTk()
+icon_path = os.path.join(base_path, "assets", "icon.ico")
+root.iconbitmap(icon_path)
+root.configure(fg_color=BG)
 root.title("Captcha Task Automator")
+
+control_frame = ctk.CTkFrame(root, fg_color="transparent")
+control_frame.pack(pady=15)
 
 window_width = 500
 window_height = 600
@@ -263,40 +274,62 @@ animate_gif()
 
 # ------------------- Solve Button -------------------
 solve_btn = ctk.CTkButton(
-    root,
+    control_frame,
     text="Solve",
     command=toggle_bot,
-    width=120,
-    height=40
+    width=140,
+    height=40,
+    fg_color=ACCENT,
+    hover_color=ACCENT_HOVER,
+    text_color="black"
 )
-solve_btn.pack(pady=15)
+solve_btn.pack()
 solve_btn.configure(state="disabled")
 
 # ------------------- Spinner (Progress Bar) -------------------
-spinner = ctk.CTkProgressBar(root, width=200)
-spinner.pack(pady=5)
-spinner.set(0)  # idle state
-spinner.pack_forget()
+spinner = ctk.CTkProgressBar(
+    control_frame,
+    width=180,
+    progress_color=ACCENT,
+    fg_color="#2a2a2a",
+    corner_radius=10
+)
+spinner.pack(pady=8)
+spinner.set(0)
 
 # ------------------- Status Label -------------------
-status_label = ctk.CTkLabel(root, text="Idle")
-status_label.pack(pady=5)
+status_label = ctk.CTkLabel(
+    control_frame,
+    text="Idle",
+    text_color=ACCENT
+)
+status_label.pack()
 
 # ------------------- Preview -------------------
-preview_frame = ctk.CTkFrame(root, width=220, height=220)
-preview_frame.pack(pady=5)
+preview_frame = ctk.CTkFrame(
+    root,
+    width=240,
+    height=240,
+    fg_color=PANEL,
+    corner_radius=12
+)
+preview_frame.pack(pady=10)
+preview_frame.pack_propagate(False)
 
-preview_label = ctk.CTkLabel(preview_frame, text="")
+preview_label = ctk.CTkLabel(preview_frame, text="Preview")
 preview_label.place(relx=0.5, rely=0.5, anchor="center")
 
 # ------------------- Log Box -------------------
 log_box = ctk.CTkTextbox(
     root,
-    width=475,
-    height=150,
+    width=460,
+    height=140,
+    fg_color=PANEL,
+    text_color=TEXT,
+    corner_radius=10,
     font=("Cascadia Code", 11)
 )
-log_box.pack(pady=10)
+log_box.pack(padx=15, pady=10, fill="both", expand=True)
 
 log_box.configure(state="disabled")
 
@@ -305,9 +338,11 @@ clear_btn = ctk.CTkButton(
     root,
     text="Clear Logs",
     command=clear_logs,
-    width=120
+    width=120,
+    fg_color="#333333",
+    hover_color="#444444"
 )
-clear_btn.pack(pady=5)
+clear_btn.pack(pady=(0, 10))
 
 Thread(target=preload_model, daemon=True).start()
 root.mainloop()

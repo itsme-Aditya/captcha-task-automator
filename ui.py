@@ -77,6 +77,6 @@ def get_buttons(master_h):
     return REFRESH_NORMAL, VERIFY_NORMAL
 
 def slow_click(gx, gy):
-    pyautogui.moveTo(gx, gy + 15, duration=0.8)
+    pyautogui.moveTo(gx, gy + 15, duration=1.25)
     time.sleep(0.1)
     pyautogui.click()
