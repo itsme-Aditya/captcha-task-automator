@@ -1,21 +1,12 @@
 import os, cv2, time, sys
 from ultralytics import YOLO
-from config import MODEL_PATH, MAX_ITERATIONS, CONF_THRESHOLD, LOGS_DIR, USE_SEGMENTATION, API_KEY
+from config import MAX_ITERATIONS, CONF_THRESHOLD, LOGS_DIR, USE_SEGMENTATION, API_KEY
 from ocr import analyze_instruction, read_error_message
 from vision import extract_captcha_elements, arrays_match
 from ui import find_master_box, capture_master_region, get_buttons, slow_click
 from segmentation import handle_segmentation
 
-try:
-    print(f"Loading YOLO model from {MODEL_PATH}...")
-    model = YOLO(MODEL_PATH)
-    if not API_KEY:
-        print("SAM3 not detected. Segmentations will be skipped.")
-except Exception as e:
-    print(f"Warning: Failed to load YOLO model: {e}")
-    model = None
-
-def get_positive_cells(grid, target):
+def get_positive_cells(model, grid, target):
     """Split grid into 9 cells, run classifier on each.
        Cell centers are calculated dynamically from grid dimensions."""
     h, w = grid.shape[:2]
@@ -61,11 +52,42 @@ def get_positive_cells(grid, target):
 
     return cells, positive_cells, cell_centers
 
+def draw_positive_cells(grid, positive_cells):
+    import cv2
+
+    h, w = grid.shape[:2]
+    cell_h = h // 3
+    cell_w = w // 3
+
+    annotated = grid.copy()
+
+    for cell_id in positive_cells:
+        _, r, c = cell_id.split("_")
+        r, c = int(r), int(c)
+
+        y1 = r * cell_h
+        y2 = (r + 1) * cell_h
+        x1 = c * cell_w
+        x2 = (c + 1) * cell_w
+
+        # transparent green overlay
+        overlay = annotated.copy()
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 0), -1)
+        cv2.addWeighted(overlay, 0.3, annotated, 0.7, 0, annotated)
+
+        # center dot
+        cx = (x1 + x2) // 2
+        cy = (y1 + y2) // 2
+        cv2.circle(annotated, (cx, cy), 5, (0, 0, 255), -1)
+
+    return annotated
+
 # ==========================================
 # Main Loop
 # ==========================================
-def observe_loop():
+def observe_loop(model, on_update=None):
     print("Starting Observation Loop...")
+    print("Main model ID:", id(model)) # <--------------------------------delete
     previous_cells = []
 
     master_x, master_y, master_w, master_h = find_master_box()
@@ -90,7 +112,9 @@ def observe_loop():
         if action == "SEGMENT":
             if USE_SEGMENTATION and API_KEY:
                 print(f"Target (segmentation): {target}")
-                handle_segmentation(grid, target, master_x, master_y, iteration)
+                if on_update:
+                    on_update(grid)  # show raw grid first
+                handle_segmentation(grid, target, master_x, master_y, iteration, on_update)
 
                 # Click Verify
                 refresh_btn, verify_btn = get_buttons(master_h)
@@ -126,8 +150,11 @@ def observe_loop():
 
         print(f"Target: {target}")
 
-        current_cells, positive_cells, cell_centers = get_positive_cells(grid, target)
+        current_cells, positive_cells, cell_centers = get_positive_cells(model, grid, target)
         print(f"Positive cells: {positive_cells}")
+        annotated = draw_positive_cells(grid, positive_cells)
+        if on_update:
+            on_update(annotated)
 
         if previous_cells and arrays_match(current_cells, previous_cells):
             print("Cells unchanged. Aborting.")

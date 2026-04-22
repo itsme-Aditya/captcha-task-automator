@@ -101,7 +101,8 @@ def toggle_bot():
                 load_resources()
                 import mss as _mss
                 sct = _mss.mss()
-                observe_loop()
+                print("Main model ID:", id(model)) # <---------------------delete
+                observe_loop(model, on_update=update_preview)
 
             finally:
                 root.after(0, on_bot_finished)
@@ -215,6 +216,20 @@ def load_gif(path):
     except EOFError:
         pass
 
+def update_preview(img):
+    def update():
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(img_rgb)
+
+        pil_img = pil_img.resize((220, 220))
+
+        tk_img = ImageTk.PhotoImage(pil_img)
+
+        preview_label.configure(image=tk_img, text="")
+        preview_label.image = tk_img  # keep reference
+
+    root.after(0, update)
+
 # ------------------- UI -------------------
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -223,7 +238,7 @@ root = ctk.CTk()
 root.title("Captcha Task Automator")
 
 window_width = 500
-window_height = 380
+window_height = 600
 
 root.update_idletasks()
 
@@ -268,8 +283,11 @@ status_label = ctk.CTkLabel(root, text="Idle")
 status_label.pack(pady=5)
 
 # ------------------- Preview -------------------
-preview_label = ctk.CTkLabel(root, text="")
-preview_label.pack(pady=5)
+preview_frame = ctk.CTkFrame(root, width=220, height=220)
+preview_frame.pack(pady=5)
+
+preview_label = ctk.CTkLabel(preview_frame, text="")
+preview_label.place(relx=0.5, rely=0.5, anchor="center")
 
 # ------------------- Log Box -------------------
 log_box = ctk.CTkTextbox(

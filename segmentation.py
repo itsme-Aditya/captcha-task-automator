@@ -7,7 +7,7 @@ GRID_SIZE = 4
 OVERLAP_THRESHOLD = 0.1
 HEADER_OFFSET = 147  # grid starts 147px below master TL
 
-def handle_segmentation(grid_img, target_class, master_x, master_y, iteration):
+def handle_segmentation(grid_img, target_class, master_x, master_y, iteration, on_update=None):
     """
     Full segmentation pipeline:
       1. Call SAM3 API with grid image + target class
@@ -73,6 +73,16 @@ def handle_segmentation(grid_img, target_class, master_x, master_y, iteration):
                 print(f"  [SAM3]   ({row},{col})  {ratio:5.1%}  << POSITIVE")
             else:
                 print(f"  [SAM3]   ({row},{col})  {ratio:5.1%}")
+
+    # SHOW RESULT BEFORE CLICKING
+    annotated = grid_img.copy()
+    overlay = annotated.copy()
+    overlay[mask > 0] = (0, 255, 0)
+    annotated = cv2.addWeighted(overlay, 0.4, annotated, 0.6, 0)
+
+    if on_update:
+        on_update(annotated)
+        time.sleep(0.5)
 
     # Click positive cells
     print(f"  [SAM3] Positive: {len(positive)} cells")
