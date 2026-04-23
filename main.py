@@ -19,6 +19,7 @@ np = None
 mss = None
 pytesseract = None
 ssim = None
+current_preview_img = None
 
 BG = "#121212"
 PANEL = "#1E1E1E"
@@ -85,7 +86,7 @@ def on_bot_finished():
     spinner.set(0)
     solve_btn.configure(text="Solve")
     status_label.configure(text="Idle")
-    preview_label.configure(image=None, text="Preview")
+    preview_label.configure(image="", text="Preview")
     preview_label.image = None
 
 def toggle_bot():
@@ -195,6 +196,16 @@ def preload_model():
             gif_running = False
             gif_label.place_forget()
 
+            new_width = 500
+            new_height = 600
+
+            screen_width = root.winfo_screenwidth()
+
+            x = screen_width - new_width - 300
+            y = 200
+
+            root.geometry(f"{new_width}x{new_height}+{x         }+{y}")
+
             solve_btn.configure(state="normal")
             status_label.configure(text="Idle", text_color="#888888")
 
@@ -215,23 +226,33 @@ def load_gif(path):
     gif_frames = []
     try:
         while True:
-            frame = gif.copy().resize((window_width, window_height))
-            gif_frames.append(ImageTk.PhotoImage(frame))
+            frame = gif.copy()
+            frame.thumbnail((window_width, window_height), Image.LANCZOS)
+
+            # black background (letterbox)
+            bg = Image.new("RGB", (window_width, window_height), (0, 0, 0))
+
+            x = (window_width - frame.width) // 2
+            y = (window_height - frame.height) // 2
+
+            bg.paste(frame, (x, y))
+
+            gif_frames.append(ImageTk.PhotoImage(bg))
             gif.seek(len(gif_frames))  # next frame
     except EOFError:
         pass
 
 def update_preview(img):
     def update():
+        global current_preview_img
+
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(img_rgb)
-
         pil_img = pil_img.resize((220, 220), Image.LANCZOS)
 
-        tk_img = ImageTk.PhotoImage(pil_img)
+        current_preview_img = ImageTk.PhotoImage(pil_img)
 
-        preview_label.configure(image=tk_img, text="")
-        preview_label.image = tk_img  # keep reference
+        preview_label.configure(image=current_preview_img, text="")
 
     root.after(0, update)
 
@@ -248,8 +269,8 @@ root.title("Captcha Task Automator")
 control_frame = ctk.CTkFrame(root, fg_color="transparent")
 control_frame.pack(pady=15)
 
-window_width = 500
-window_height = 600
+window_width = 800
+window_height = 450
 
 root.update_idletasks()
 
@@ -266,7 +287,7 @@ gif_label = tk.Label(root, bd=0)
 gif_label.place(x=0, y=0, relwidth=1, relheight=1)
 gif_label.lift()
 
-gif_path = os.path.join(base_path, "assets", "intro1.gif")
+gif_path = os.path.join(base_path, "assets", "intro.gif")
 load_gif(gif_path)
 
 gif_running = True

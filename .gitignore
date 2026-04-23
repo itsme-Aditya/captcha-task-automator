@@ -4,3 +4,5 @@ assets/
 .env
 __pycache__/
 logs/
+build/
+dist/
