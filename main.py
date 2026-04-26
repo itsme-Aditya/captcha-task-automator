@@ -197,12 +197,12 @@ def preload_model():
             gif_label.place_forget()
 
             new_width = 500
-            new_height = 600
+            new_height = 700
 
             screen_width = root.winfo_screenwidth()
 
             x = screen_width - new_width - 300
-            y = 200
+            y = 70
 
             root.geometry(f"{new_width}x{new_height}+{x         }+{y}")
 
@@ -248,7 +248,7 @@ def update_preview(img):
 
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(img_rgb)
-        pil_img = pil_img.resize((220, 220), Image.LANCZOS)
+        pil_img = pil_img.resize((320, 320), Image.LANCZOS)
 
         current_preview_img = ImageTk.PhotoImage(pil_img)
 
@@ -329,8 +329,8 @@ status_label.pack()
 # ------------------- Preview -------------------
 preview_frame = ctk.CTkFrame(
     root,
-    width=240,
-    height=240,
+    width=340,
+    height=340,
     fg_color=PANEL,
     corner_radius=12
 )
