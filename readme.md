@@ -2,6 +2,10 @@
 
 An advanced, AI-driven automation suite designed to solve complex visual captchas. This system integrates Object Detection (**YOLOv8**), Computer Vision (**OpenCV**), and Cloud-based Segmentation (**SAM3**) to automate grid-based and selection-based tasks with high precision.
 
+## Demo
+
+[![Watch the demo](https://img.youtube.com/vi/PdfPxPpi-E0/0.jpg)](https://youtu.be/PdfPxPpi-E0)
+
 ## 🚀 Key Features
 
 * **Intelligent Instruction Parsing**: Uses Tesseract OCR and NLTK to interpret captcha headers and identify target objects like traffic lights, hydrants, or stairs.
