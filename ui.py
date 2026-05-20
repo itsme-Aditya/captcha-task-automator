@@ -1,8 +1,6 @@
 import numpy as np
-import mss, cv2, pyautogui, time
+import mss, cv2, time
 from config import REFRESH_NORMAL, VERIFY_NORMAL, REFRESH_ERROR, VERIFY_ERROR
-
-pyautogui.FAILSAFE = True
 
 def find_master_box():
     """Finds captcha area: header TL for origin, header width for W,
@@ -77,6 +75,8 @@ def get_buttons(master_h):
     return REFRESH_NORMAL, VERIFY_NORMAL
 
 def slow_click(gx, gy):
+    import pyautogui
+    pyautogui.FAILSAFE = True
     pyautogui.moveTo(gx, gy + 15, duration=1.25)
     time.sleep(0.1)
     pyautogui.click()

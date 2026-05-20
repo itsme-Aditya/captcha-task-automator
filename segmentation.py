@@ -1,6 +1,7 @@
 import numpy as np
 import os, cv2, requests, time, base64
-from config import LOGS_DIR, API_KEY
+import config
+from config import LOGS_DIR
 from ui import slow_click
 
 GRID_SIZE = 4
@@ -25,7 +26,7 @@ def handle_segmentation(grid_img, target_class, master_x, master_y, iteration, o
 
     # Call SAM3 API
     print(f"  [SAM3] Using SAM3  |  prompt: '{target_class}'")
-    url = f"https://serverless.roboflow.com/sam3/concept_segment?api_key={API_KEY}"
+    url = f"https://serverless.roboflow.com/sam3/concept_segment?api_key={config.API_KEY}"
     resp = requests.post(
         url,
         headers={"Content-Type": "application/json"},

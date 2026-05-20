@@ -1,6 +1,5 @@
-import os, cv2, time, sys
-from ultralytics import YOLO
-from config import MAX_ITERATIONS, CONF_THRESHOLD, LOGS_DIR, USE_SEGMENTATION, API_KEY
+import os, cv2, time, sys, config
+from config import MAX_ITERATIONS, CONF_THRESHOLD, LOGS_DIR, USE_SEGMENTATION
 from ocr import analyze_instruction, read_error_message
 from vision import extract_captcha_elements, arrays_match
 from ui import find_master_box, capture_master_region, get_buttons, slow_click
@@ -109,7 +108,7 @@ def observe_loop(model, on_update=None):
         action, target = analyze_instruction(header)
 
         if action == "SEGMENT":
-            if USE_SEGMENTATION and API_KEY:
+            if USE_SEGMENTATION and config.API_KEY:
                 print(f"Target (segmentation): {target}")
                 if on_update:
                     on_update(grid)  # show raw grid first
